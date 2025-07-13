@@ -46,7 +46,7 @@ class ADALINE:
         self.annealing = annealing
         self.annealing_rate = annealing_rate
     
-    def initialize_weights(self, dimension: int, reinitialize: bool=False) -> None:
+    def _initialize_weights(self, dimension: int, reinitialize: bool=False) -> None:
         """
         Initialize weights and bias.
 
@@ -144,7 +144,7 @@ class ADALINE:
         
         return np.mean(error**2)  # Return mean squared error
     
-    def run_batch_epoch(self, X_train: np.array, y_train: np.array) -> None:
+    def _run_batch_epoch(self, X_train: np.array, y_train: np.array) -> None:
         """
         Run one epoch of batch gradient descent.
 
@@ -158,7 +158,7 @@ class ADALINE:
         self.losses.append(self._update_weights(X_train, y_train))
         return self
 
-    def run_sgd_epoch(self, X_train: np.array, y_train: np.array, batch_size: int=1):
+    def _run_sgd_epoch(self, X_train: np.array, y_train: np.array, batch_size: int=1):
         """
         Run one epoch of stochastic gradient descent.
 
@@ -194,7 +194,7 @@ class ADALINE:
         Returns:
             self
         """
-        self.initialize_weights(X_train.shape[1])
+        self._initialize_weights(X_train.shape[1])
         self.losses = []
         
         if iterations:
@@ -208,7 +208,7 @@ class ADALINE:
         for e in range(self.epochs):
             if self.annealing:
                 self.eta *= (self.annealing_rate ** e)  # Anneal learning rate
-            self.run_sgd_epoch(X_train, y_train, batch_size)
+            self._run_sgd_epoch(X_train, y_train, batch_size)
         
         self.eta = lr  # Restore initial learning rate
 
@@ -227,7 +227,7 @@ class ADALINE:
         Returns:
             self
         """
-        self.initialize_weights(X_train.shape[1])
+        self._initialize_weights(X_train.shape[1])
         self.losses = []
         
         if iterations:
@@ -237,6 +237,6 @@ class ADALINE:
             self.eta = learning_rate
         
         for _ in range(self.epochs):
-            self.run_batch_epoch(X_train, y_train)
+            self._run_batch_epoch(X_train, y_train)
         
         return self
