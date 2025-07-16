@@ -3,7 +3,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import warnings
-from typing import Optional, List, Tuple, Union, Any
+from typing import Optional, List, Tuple, Union, Any, Dict
 from numpy.typing import ArrayLike
 
 class DecisionRegionPlotter:
@@ -12,6 +12,7 @@ class DecisionRegionPlotter:
     
     This class provides a clean interface for visualizing decision boundaries
     and regions for any classifier that implements a predict() method.
+    Enhanced with better multiclass support.
     """
     
     def __init__(self, style: str = 'whitegrid', palette: str = 'Set2', context: str = 'notebook') -> None:
@@ -31,12 +32,80 @@ class DecisionRegionPlotter:
         sns.set_context(context)
         self.palette = palette
         
+        # Enhanced marker and color support for multiclass
+        self.default_markers = ['o', 's', '^', 'v', '<', '>', 'D', 'p', '*', 'h', 'H', '+', 'x', '8']
+        self.marker_sizes = {'train': 60, 'test': 100}
+        
+    def _get_class_styling(self, unique_classes: np.ndarray, custom_colors: Optional[Dict] = None, 
+                          custom_markers: Optional[Dict] = None) -> Tuple[List, List]:
+        """
+        Get consistent colors and markers for each class.
+        
+        Parameters:
+        -----------
+        unique_classes : array-like
+            Unique class labels
+        custom_colors : dict, optional
+            Custom color mapping {class_label: color}
+        custom_markers : dict, optional
+            Custom marker mapping {class_label: marker}
+            
+        Returns:
+        --------
+        colors : list
+            Colors for each class
+        markers : list
+            Markers for each class
+        """
+        n_classes = len(unique_classes)
+        
+        # Get colors
+        if custom_colors:
+            colors = [custom_colors.get(cls, sns.color_palette(self.palette, n_classes)[i]) 
+                     for i, cls in enumerate(unique_classes)]
+        else:
+            colors = sns.color_palette(self.palette, n_classes)
+        
+        # Get markers
+        if custom_markers:
+            markers = [custom_markers.get(cls, self.default_markers[i % len(self.default_markers)]) 
+                      for i, cls in enumerate(unique_classes)]
+        else:
+            markers = [self.default_markers[i % len(self.default_markers)] 
+                      for i in range(n_classes)]
+        
+        return colors, markers
+    
+    def _create_class_legend_labels(self, unique_classes: np.ndarray, class_names: Optional[Dict] = None) -> List[str]:
+        """
+        Create readable legend labels for classes.
+        
+        Parameters:
+        -----------
+        unique_classes : array-like
+            Unique class labels
+        class_names : dict, optional
+            Custom class names mapping {class_label: readable_name}
+            
+        Returns:
+        --------
+        labels : list
+            Readable labels for each class
+        """
+        if class_names:
+            return [class_names.get(cls, f'Class {cls}') for cls in unique_classes]
+        else:
+            return [f'Class {cls}' for cls in unique_classes]
+        
     def plot_decision_regions(self, X_train: ArrayLike, y_train: ArrayLike, classifier: Any,
                             X_test: Optional[ArrayLike] = None, y_test: Optional[ArrayLike] = None,
                             feature_indices: Optional[Tuple[int, int]] = None,
                             resolution: float = 0.02, figsize: Tuple[int, int] = (10, 8), 
                             alpha_regions: float = 0.3, alpha_points: float = 0.8,
-                            title: Optional[str] = None, feature_names: Optional[List[str]] = None) -> Tuple[plt.Figure, plt.Axes]:
+                            title: Optional[str] = None, feature_names: Optional[List[str]] = None,
+                            class_names: Optional[Dict] = None, custom_colors: Optional[Dict] = None,
+                            custom_markers: Optional[Dict] = None, show_test_legend: bool = True,
+                            legend_loc: str = 'best') -> Tuple[plt.Figure, plt.Axes]:
         """
         Plot decision regions for a 2D projection of classification data.
         
@@ -66,6 +135,16 @@ class DecisionRegionPlotter:
             Plot title
         feature_names : list, optional
             Names for all features (will select the two being plotted)
+        class_names : dict, optional
+            Custom readable names for classes {class_label: readable_name}
+        custom_colors : dict, optional
+            Custom colors for classes {class_label: color}
+        custom_markers : dict, optional
+            Custom markers for classes {class_label: marker}
+        show_test_legend : bool, default=True
+            Whether to show separate legend entries for test points
+        legend_loc : str, default='best'
+            Legend location
         
         Returns:
         --------
@@ -116,10 +195,10 @@ class DecisionRegionPlotter:
         # Create figure
         fig, ax = plt.subplots(figsize=figsize)
         
-        # Get unique classes and create color palette
+        # Get unique classes and styling
         unique_classes = np.unique(y_combined)
-        n_classes = len(unique_classes)
-        colors = sns.color_palette(self.palette, n_classes)
+        colors, markers = self._get_class_styling(unique_classes, custom_colors, custom_markers)
+        class_labels = self._create_class_legend_labels(unique_classes, class_names)
         
         # Create colormap for regions
         cmap = ListedColormap(colors)
@@ -165,44 +244,52 @@ class DecisionRegionPlotter:
         
         predictions = predictions.reshape(xx1.shape)
         
-        # Plot decision regions with more levels for smoother boundaries
-        contour_levels = max(n_classes, 10)  # Use at least 10 levels for smooth boundaries
-        ax.contourf(xx1, xx2, predictions, alpha=alpha_regions, cmap=cmap, levels=contour_levels)
+        # Plot decision regions
+        ax.contourf(xx1, xx2, predictions, alpha=alpha_regions, cmap=cmap, levels=len(unique_classes))
         
         # Plot data points for each class
-        markers = ['o', 's', '^', 'v', '<', '>', 'D', 'p', '*', 'h']
+        legend_handles = []
         
         # Plot training points
         for idx, class_value in enumerate(unique_classes):
             train_mask = (y_train == class_value)
             if np.any(train_mask):
-                ax.scatter(
+                scatter = ax.scatter(
                     X_train_2d[train_mask, 0], 
                     X_train_2d[train_mask, 1],
                     c=[colors[idx]], 
-                    marker=markers[idx % len(markers)],
-                    s=60,
+                    marker=markers[idx],
+                    s=self.marker_sizes['train'],
                     alpha=alpha_points,
                     edgecolor='black',
                     linewidth=0.5,
-                    label=f'Train Class {class_value}'
+                    label=f'{class_labels[idx]} (Train)'
                 )
+                legend_handles.append(scatter)
         
         # Plot test points if provided
         if X_test_2d is not None and y_test is not None:
             for idx, class_value in enumerate(unique_classes):
                 test_mask = (y_test == class_value)
                 if np.any(test_mask):
-                    ax.scatter(
+                    if show_test_legend:
+                        label = f'{class_labels[idx]} (Test)'
+                    else:
+                        label = None
+                    
+                    scatter = ax.scatter(
                         X_test_2d[test_mask, 0], 
                         X_test_2d[test_mask, 1],
                         c='none',
-                        edgecolor='black',
+                        edgecolor=colors[idx],
                         linewidth=2,
-                        marker=markers[idx % len(markers)],
-                        s=100,
-                        label=f'Test Class {class_value}'
+                        marker=markers[idx],
+                        s=self.marker_sizes['test'],
+                        alpha=alpha_points,
+                        label=label
                     )
+                    if show_test_legend:
+                        legend_handles.append(scatter)
         
         # Customize plot
         ax.set_xlim(xx1.min(), xx1.max())
@@ -224,8 +311,9 @@ class DecisionRegionPlotter:
             ax.set_title(f'Decision Regions: Features {feat_x} vs {feat_y}\n'
                         f'(Other features fixed at mean values)')
         
-        # Add legend
-        ax.legend()
+        # Add legend with better multiclass support
+        if legend_handles:
+            ax.legend(handles=legend_handles, loc=legend_loc, frameon=True, fancybox=True, shadow=True)
         
         # Apply seaborn styling
         sns.despine()
@@ -237,7 +325,9 @@ class DecisionRegionPlotter:
                                 X_test: Optional[ArrayLike] = None, y_test: Optional[ArrayLike] = None,
                                 feature_indices: Optional[Tuple[int, int]] = None,
                                 resolution: float = 0.02, figsize: Tuple[int, int] = (15, 10),
-                                feature_names: Optional[List[str]] = None) -> Tuple[plt.Figure, np.ndarray]:
+                                feature_names: Optional[List[str]] = None,
+                                class_names: Optional[Dict] = None, custom_colors: Optional[Dict] = None,
+                                custom_markers: Optional[Dict] = None, show_test_legend: bool = True) -> Tuple[plt.Figure, np.ndarray]:
         """
         Plot decision regions for multiple classifiers in subplots.
         
@@ -259,6 +349,14 @@ class DecisionRegionPlotter:
             Figure size
         feature_names : list, optional
             Names for all features (will select the two being plotted)
+        class_names : dict, optional
+            Custom readable names for classes {class_label: readable_name}
+        custom_colors : dict, optional
+            Custom colors for classes {class_label: color}
+        custom_markers : dict, optional
+            Custom markers for classes {class_label: marker}
+        show_test_legend : bool, default=True
+            Whether to show separate legend entries for test points
         
         Returns:
         --------
@@ -292,7 +390,8 @@ class DecisionRegionPlotter:
             
             # Plot decision regions
             self._plot_single_region(X_train, y_train, classifier, ax, X_test, y_test,
-                                   feature_indices, resolution, title, feature_names)
+                                   feature_indices, resolution, title, feature_names,
+                                   class_names, custom_colors, custom_markers, show_test_legend)
         
         # Hide unused subplots
         for idx in range(n_classifiers, len(axes_flat)):
@@ -305,7 +404,9 @@ class DecisionRegionPlotter:
                           X_test: Optional[ArrayLike] = None, y_test: Optional[ArrayLike] = None,
                           feature_indices: Optional[Tuple[int, int]] = None,
                           resolution: float = 0.02, title: Optional[str] = None, 
-                          feature_names: Optional[List[str]] = None) -> None:
+                          feature_names: Optional[List[str]] = None,
+                          class_names: Optional[Dict] = None, custom_colors: Optional[Dict] = None,
+                          custom_markers: Optional[Dict] = None, show_test_legend: bool = True) -> None:
         """Helper method for plotting a single decision region."""
         
         # Convert to numpy arrays
@@ -336,10 +437,11 @@ class DecisionRegionPlotter:
             y_combined = y_train
             X_test_2d = None
         
-        # Get unique classes and create color palette
+        # Get unique classes and styling
         unique_classes = np.unique(y_combined)
-        n_classes = len(unique_classes)
-        colors = sns.color_palette(self.palette, n_classes)
+        colors, markers = self._get_class_styling(unique_classes, custom_colors, custom_markers)
+        class_labels = self._create_class_legend_labels(unique_classes, class_names)
+        
         cmap = ListedColormap(colors)
         
         # Create mesh with adaptive padding
@@ -378,34 +480,41 @@ class DecisionRegionPlotter:
             warnings.warn(f"Prediction failed: {e}")
             predictions = np.zeros(xx1.shape)
         
-        contour_levels = max(n_classes, 10)  # Use at least 10 levels for smooth boundaries
-        ax.contourf(xx1, xx2, predictions, alpha=0.3, cmap=cmap, levels=contour_levels)
+        ax.contourf(xx1, xx2, predictions, alpha=0.3, cmap=cmap, levels=len(unique_classes))
         
         # Plot data points
-        markers = ['o', 's', '^', 'v', '<', '>', 'D', 'p', '*', 'h']
+        legend_handles = []
         
         # Plot training points
         for idx, class_value in enumerate(unique_classes):
             train_mask = (y_train == class_value)
             if np.any(train_mask):
-                ax.scatter(
+                scatter = ax.scatter(
                     X_train_2d[train_mask, 0], X_train_2d[train_mask, 1],
-                    c=[colors[idx]], marker=markers[idx % len(markers)],
-                    s=60, alpha=0.8, edgecolor='black', linewidth=0.5,
-                    label=f'Train Class {class_value}'
+                    c=[colors[idx]], marker=markers[idx],
+                    s=self.marker_sizes['train'], alpha=0.8, edgecolor='black', linewidth=0.5,
+                    label=f'{class_labels[idx]} (Train)'
                 )
+                legend_handles.append(scatter)
         
         # Plot test points if provided
         if X_test_2d is not None and y_test is not None:
             for idx, class_value in enumerate(unique_classes):
                 test_mask = (y_test == class_value)
                 if np.any(test_mask):
-                    ax.scatter(
+                    if show_test_legend:
+                        label = f'{class_labels[idx]} (Test)'
+                    else:
+                        label = None
+                    
+                    scatter = ax.scatter(
                         X_test_2d[test_mask, 0], X_test_2d[test_mask, 1],
-                        c='none', marker=markers[idx % len(markers)],
-                        s=100, alpha=0.8, edgecolor='black', linewidth=2,
-                        label=f'Test Class {class_value}'
+                        c='none', marker=markers[idx],
+                        s=self.marker_sizes['test'], alpha=0.8, edgecolor=colors[idx], linewidth=2,
+                        label=label
                     )
+                    if show_test_legend:
+                        legend_handles.append(scatter)
         
         # Customize
         ax.set_xlim(xx1.min(), xx1.max())
@@ -423,23 +532,38 @@ class DecisionRegionPlotter:
         elif n_features > 2:
             ax.set_title(f'Features {feat_x} vs {feat_y}')
         
-        ax.legend()
+        # Add legend
+        if legend_handles:
+            ax.legend(handles=legend_handles, loc='best', frameon=True, fancybox=True, shadow=True)
 
 
-# Convenience function for quick plotting
+# Enhanced convenience function
 def plot_decision_regions(X_train: ArrayLike, y_train: ArrayLike, classifier: Any,
                          X_test: Optional[ArrayLike] = None, y_test: Optional[ArrayLike] = None,
                          feature_indices: Optional[Tuple[int, int]] = None,
                          resolution: float = 0.01, figsize: Tuple[int, int] = (10, 8), 
                          alpha_regions: float = 0.3, alpha_points: float = 0.8,
                          title: Optional[str] = None, feature_names: Optional[List[str]] = None,
+                         class_names: Optional[Dict] = None, custom_colors: Optional[Dict] = None,
+                         custom_markers: Optional[Dict] = None, show_test_legend: bool = True,
                          style: str = 'whitegrid', palette: str = 'Set2') -> Tuple[plt.Figure, plt.Axes]:
     """
-    Quick function to plot decision regions with seaborn styling.
+    Quick function to plot decision regions with enhanced multiclass support.
     
-    Parameters are the same as DecisionRegionPlotter.plot_decision_regions()
+    Parameters:
+    -----------
+    All parameters from DecisionRegionPlotter.plot_decision_regions() plus:
+    class_names : dict, optional
+        Custom readable names for classes {class_label: readable_name}
+    custom_colors : dict, optional
+        Custom colors for classes {class_label: color}
+    custom_markers : dict, optional
+        Custom markers for classes {class_label: marker}
+    show_test_legend : bool, default=True
+        Whether to show separate legend entries for test points
     """
     plotter = DecisionRegionPlotter(style=style, palette=palette)
     return plotter.plot_decision_regions(X_train, y_train, classifier, X_test, y_test, 
                                        feature_indices, resolution, figsize, alpha_regions, alpha_points,
-                                       title, feature_names)
+                                       title, feature_names, class_names, custom_colors, custom_markers,
+                                       show_test_legend)
