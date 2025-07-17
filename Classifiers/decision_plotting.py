@@ -105,7 +105,8 @@ class DecisionRegionPlotter:
                             title: Optional[str] = None, feature_names: Optional[List[str]] = None,
                             class_names: Optional[Dict] = None, custom_colors: Optional[Dict] = None,
                             custom_markers: Optional[Dict] = None, show_test_legend: bool = True,
-                            legend_loc: str = 'best') -> Tuple[plt.Figure, plt.Axes]:
+                            legend_loc: str = 'best', fast_mode: bool = False, 
+                            max_samples: int = 1000, batch_size: int = 10000) -> Tuple[plt.Figure, plt.Axes]:
         """
         Plot decision regions for a 2D projection of classification data.
         
@@ -145,6 +146,12 @@ class DecisionRegionPlotter:
             Whether to show separate legend entries for test points
         legend_loc : str, default='best'
             Legend location
+        fast_mode : bool, default=False
+            Enable optimizations for large datasets/slow classifiers like Random Forest
+        max_samples : int, default=1000
+            Maximum training samples to use for determining mesh bounds in fast_mode
+        batch_size : int, default=10000
+            Batch size for mesh predictions to avoid memory issues
         
         Returns:
         --------
@@ -158,6 +165,17 @@ class DecisionRegionPlotter:
         if X_test is not None:
             X_test = np.array(X_test)
             y_test = np.array(y_test)
+        
+        # Fast mode optimizations for large datasets
+        if fast_mode and len(X_train) > max_samples:
+            # Subsample training data for determining plot bounds only
+            indices = np.random.choice(len(X_train), max_samples, replace=False)
+            X_train_subset = X_train[indices]
+            y_train_subset = y_train[indices]
+            print(f"Fast mode: Using {max_samples} samples for plot bounds")
+        else:
+            X_train_subset = X_train
+            y_train_subset = y_train
         
         # Validate input
         if X_train.ndim != 2:
@@ -182,14 +200,15 @@ class DecisionRegionPlotter:
         
         # Extract the two features for plotting
         X_train_2d = X_train[:, [feat_x, feat_y]]
+        X_train_subset_2d = X_train_subset[:, [feat_x, feat_y]]
         
         if X_test is not None:
             X_test_2d = X_test[:, [feat_x, feat_y]]
-            X_combined_2d = np.vstack((X_train_2d, X_test_2d))
-            y_combined = np.hstack((y_train, y_test))
+            X_combined_2d = np.vstack((X_train_subset_2d, X_test_2d))
+            y_combined = np.hstack((y_train_subset, y_test))
         else:
-            X_combined_2d = X_train_2d
-            y_combined = y_train
+            X_combined_2d = X_train_subset_2d
+            y_combined = y_train_subset
             X_test_2d = None
         
         # Create figure
@@ -211,6 +230,29 @@ class DecisionRegionPlotter:
         
         x1_min, x1_max = X_combined_2d[:, 0].min() - padding, X_combined_2d[:, 0].max() + padding
         x2_min, x2_max = X_combined_2d[:, 1].min() - padding, X_combined_2d[:, 1].max() + padding
+        
+        # Smart resolution adjustment to prevent memory issues
+        x1_points = int((x1_max - x1_min) / resolution) + 1
+        x2_points = int((x2_max - x2_min) / resolution) + 1
+        total_points = x1_points * x2_points
+        
+        # Limit mesh size to prevent memory errors
+        max_mesh_points = 1000000 if fast_mode else 2500000  # 1M or 2.5M points max
+        
+        if total_points > max_mesh_points:
+            # Calculate new resolution to stay under limit
+            optimal_points_per_dim = int(np.sqrt(max_mesh_points))
+            new_resolution_x = (x1_max - x1_min) / optimal_points_per_dim
+            new_resolution_y = (x2_max - x2_min) / optimal_points_per_dim
+            resolution = max(new_resolution_x, new_resolution_y)
+            
+            print(f"Mesh too large ({total_points:,} points). Adjusting resolution to {resolution:.3f}")
+            print(f"Data ranges: X=[{x1_min:.2f}, {x1_max:.2f}], Y=[{x2_min:.2f}, {x2_max:.2f}]")
+        
+        # Automatically adjust resolution for fast mode after mesh size check
+        if fast_mode and resolution < 0.05:
+            resolution = max(resolution, 0.05)  # Use the larger of calculated or minimum
+            print(f"Fast mode: Final resolution {resolution:.3f}")
         
         xx1, xx2 = np.meshgrid(
             np.arange(x1_min, x1_max, resolution),
@@ -235,9 +277,19 @@ class DecisionRegionPlotter:
         else:
             mesh_full = mesh_2d
         
-        # Handle potential prediction errors
+        # Handle potential prediction errors with batching for large meshes
         try:
-            predictions = classifier.predict(mesh_full)
+            mesh_size = mesh_full.shape[0]
+            if mesh_size > batch_size:
+                # Process in batches to avoid memory issues
+                predictions = np.zeros(mesh_size)
+                for i in range(0, mesh_size, batch_size):
+                    end_idx = min(i + batch_size, mesh_size)
+                    batch_predictions = classifier.predict(mesh_full[i:end_idx])
+                    predictions[i:end_idx] = batch_predictions
+                print(f"Processed {mesh_size} predictions in {(mesh_size + batch_size - 1) // batch_size} batches")
+            else:
+                predictions = classifier.predict(mesh_full)
         except Exception as e:
             warnings.warn(f"Prediction failed: {e}")
             predictions = np.zeros(mesh_full.shape[0])
@@ -327,7 +379,9 @@ class DecisionRegionPlotter:
                                 resolution: float = 0.02, figsize: Tuple[int, int] = (15, 10),
                                 feature_names: Optional[List[str]] = None,
                                 class_names: Optional[Dict] = None, custom_colors: Optional[Dict] = None,
-                                custom_markers: Optional[Dict] = None, show_test_legend: bool = True) -> Tuple[plt.Figure, np.ndarray]:
+                                custom_markers: Optional[Dict] = None, show_test_legend: bool = True,
+                                fast_mode: bool = False, max_samples: int = 1000, 
+                                batch_size: int = 10000) -> Tuple[plt.Figure, np.ndarray]:
         """
         Plot decision regions for multiple classifiers in subplots.
         
@@ -357,6 +411,12 @@ class DecisionRegionPlotter:
             Custom markers for classes {class_label: marker}
         show_test_legend : bool, default=True
             Whether to show separate legend entries for test points
+        fast_mode : bool, default=False
+            Enable optimizations for large datasets/slow classifiers
+        max_samples : int, default=1000
+            Maximum training samples to use for determining mesh bounds in fast_mode
+        batch_size : int, default=10000
+            Batch size for mesh predictions to avoid memory issues
         
         Returns:
         --------
@@ -391,7 +451,8 @@ class DecisionRegionPlotter:
             # Plot decision regions
             self._plot_single_region(X_train, y_train, classifier, ax, X_test, y_test,
                                    feature_indices, resolution, title, feature_names,
-                                   class_names, custom_colors, custom_markers, show_test_legend)
+                                   class_names, custom_colors, custom_markers, show_test_legend,
+                                   fast_mode, max_samples, batch_size)
         
         # Hide unused subplots
         for idx in range(n_classifiers, len(axes_flat)):
@@ -406,7 +467,9 @@ class DecisionRegionPlotter:
                           resolution: float = 0.02, title: Optional[str] = None, 
                           feature_names: Optional[List[str]] = None,
                           class_names: Optional[Dict] = None, custom_colors: Optional[Dict] = None,
-                          custom_markers: Optional[Dict] = None, show_test_legend: bool = True) -> None:
+                          custom_markers: Optional[Dict] = None, show_test_legend: bool = True,
+                          fast_mode: bool = False, max_samples: int = 1000, 
+                          batch_size: int = 10000) -> None:
         """Helper method for plotting a single decision region."""
         
         # Convert to numpy arrays
@@ -417,6 +480,15 @@ class DecisionRegionPlotter:
             X_test = np.array(X_test)
             y_test = np.array(y_test)
         
+        # Fast mode optimizations
+        if fast_mode and len(X_train) > max_samples:
+            indices = np.random.choice(len(X_train), max_samples, replace=False)
+            X_train_subset = X_train[indices]
+            y_train_subset = y_train[indices]
+        else:
+            X_train_subset = X_train
+            y_train_subset = y_train
+        
         # Set default feature indices
         if feature_indices is None:
             feature_indices = (0, 1)
@@ -426,15 +498,16 @@ class DecisionRegionPlotter:
         
         # Extract the two features for plotting
         X_train_2d = X_train[:, [feat_x, feat_y]]
+        X_train_subset_2d = X_train_subset[:, [feat_x, feat_y]]
         
         # Combine train and test data for plotting range
         if X_test is not None:
             X_test_2d = X_test[:, [feat_x, feat_y]]
-            X_combined_2d = np.vstack((X_train_2d, X_test_2d))
-            y_combined = np.hstack((y_train, y_test))
+            X_combined_2d = np.vstack((X_train_subset_2d, X_test_2d))
+            y_combined = np.hstack((y_train_subset, y_test))
         else:
-            X_combined_2d = X_train_2d
-            y_combined = y_train
+            X_combined_2d = X_train_subset_2d
+            y_combined = y_train_subset
             X_test_2d = None
         
         # Get unique classes and styling
@@ -444,13 +517,29 @@ class DecisionRegionPlotter:
         
         cmap = ListedColormap(colors)
         
-        # Create mesh with adaptive padding
+        # Create mesh with adaptive padding and size limits
         x1_range = X_combined_2d[:, 0].max() - X_combined_2d[:, 0].min()
         x2_range = X_combined_2d[:, 1].max() - X_combined_2d[:, 1].min()
         padding = max(x1_range, x2_range) * 0.1  # 10% padding
         
         x1_min, x1_max = X_combined_2d[:, 0].min() - padding, X_combined_2d[:, 0].max() + padding
         x2_min, x2_max = X_combined_2d[:, 1].min() - padding, X_combined_2d[:, 1].max() + padding
+        
+        # Smart resolution adjustment to prevent memory issues
+        x1_points = int((x1_max - x1_min) / resolution) + 1
+        x2_points = int((x2_max - x2_min) / resolution) + 1
+        total_points = x1_points * x2_points
+        
+        max_mesh_points = 1000000 if fast_mode else 2500000
+        
+        if total_points > max_mesh_points:
+            optimal_points_per_dim = int(np.sqrt(max_mesh_points))
+            new_resolution_x = (x1_max - x1_min) / optimal_points_per_dim
+            new_resolution_y = (x2_max - x2_min) / optimal_points_per_dim
+            resolution = max(new_resolution_x, new_resolution_y)
+        
+        if fast_mode and resolution < 0.05:
+            resolution = max(resolution, 0.05)
         
         xx1, xx2 = np.meshgrid(
             np.arange(x1_min, x1_max, resolution),
@@ -473,9 +562,17 @@ class DecisionRegionPlotter:
         else:
             mesh_full = mesh_2d
         
-        # Predict and plot regions
+        # Predict and plot regions with batching
         try:
-            predictions = classifier.predict(mesh_full).reshape(xx1.shape)
+            mesh_size = mesh_full.shape[0]
+            if mesh_size > batch_size:
+                predictions = np.zeros(mesh_size)
+                for i in range(0, mesh_size, batch_size):
+                    end_idx = min(i + batch_size, mesh_size)
+                    predictions[i:end_idx] = classifier.predict(mesh_full[i:end_idx])
+            else:
+                predictions = classifier.predict(mesh_full)
+            predictions = predictions.reshape(xx1.shape)
         except Exception as e:
             warnings.warn(f"Prediction failed: {e}")
             predictions = np.zeros(xx1.shape)
@@ -537,6 +634,77 @@ class DecisionRegionPlotter:
             ax.legend(handles=legend_handles, loc='best', frameon=True, fancybox=True, shadow=True)
 
 
+def check_data_for_plotting(X_train: ArrayLike, y_train: ArrayLike, 
+                           X_test: Optional[ArrayLike] = None, y_test: Optional[ArrayLike] = None,
+                           feature_indices: Optional[Tuple[int, int]] = None,
+                           resolution: float = 0.02) -> None:
+    """
+    Check your data before plotting to estimate memory requirements and suggest settings.
+    
+    Parameters:
+    -----------
+    X_train, y_train : array-like
+        Training data
+    X_test, y_test : array-like, optional
+        Test data
+    feature_indices : tuple, optional
+        Which features to analyze
+    resolution : float
+        Proposed resolution
+    """
+    X_train = np.array(X_train)
+    if X_test is not None:
+        X_test = np.array(X_test)
+        X_combined = np.vstack((X_train, X_test))
+    else:
+        X_combined = X_train
+    
+    if feature_indices is None:
+        feature_indices = (0, 1)
+    
+    feat_x, feat_y = feature_indices
+    X_2d = X_combined[:, [feat_x, feat_y]]
+    
+    # Calculate ranges
+    x1_range = X_2d[:, 0].max() - X_2d[:, 0].min()
+    x2_range = X_2d[:, 1].max() - X_2d[:, 1].min()
+    padding = max(x1_range, x2_range) * 0.1
+    
+    x1_min, x1_max = X_2d[:, 0].min() - padding, X_2d[:, 0].max() + padding
+    x2_min, x2_max = X_2d[:, 1].min() - padding, X_2d[:, 1].max() + padding
+    
+    # Calculate mesh size
+    x1_points = int((x1_max - x1_min) / resolution) + 1
+    x2_points = int((x2_max - x2_min) / resolution) + 1
+    total_points = x1_points * x2_points
+    memory_gb = total_points * 8 * 2 / (1024**3)  # Rough estimate
+    
+    print("=== DATA ANALYSIS FOR PLOTTING ===")
+    print(f"Feature {feat_x} range: [{X_2d[:, 0].min():.2f}, {X_2d[:, 0].max():.2f}] (span: {x1_range:.2f})")
+    print(f"Feature {feat_y} range: [{X_2d[:, 1].min():.2f}, {X_2d[:, 1].max():.2f}] (span: {x2_range:.2f})")
+    print(f"With resolution {resolution}:")
+    print(f"  - Grid size: {x1_points:,} x {x2_points:,} = {total_points:,} points")
+    print(f"  - Estimated memory: ~{memory_gb:.1f} GB")
+    
+    # Recommendations
+    if total_points > 2500000:
+        print("\n⚠️  WARNING: Very large mesh! Recommendations:")
+        optimal_resolution = max((x1_max - x1_min) / 1000, (x2_max - x2_min) / 1000)
+        print(f"  - Use fast_mode=True")
+        print(f"  - Try resolution={optimal_resolution:.3f} or higher")
+        print(f"  - Consider normalizing/scaling your features first")
+    elif total_points > 1000000:
+        print("\n⚠️  Large mesh. Consider:")
+        print(f"  - Use fast_mode=True")
+        print(f"  - Try resolution={resolution*2:.3f}")
+    else:
+        print("\n✅ Mesh size looks reasonable!")
+    
+    print(f"\nSample usage:")
+    print(f"plot_decision_regions(X_train, y_train, classifier,")
+    print(f"                     fast_mode=True, resolution={max(resolution, 0.1):.1f})")
+
+
 # Enhanced convenience function
 def plot_decision_regions(X_train: ArrayLike, y_train: ArrayLike, classifier: Any,
                          X_test: Optional[ArrayLike] = None, y_test: Optional[ArrayLike] = None,
@@ -546,7 +714,9 @@ def plot_decision_regions(X_train: ArrayLike, y_train: ArrayLike, classifier: An
                          title: Optional[str] = None, feature_names: Optional[List[str]] = None,
                          class_names: Optional[Dict] = None, custom_colors: Optional[Dict] = None,
                          custom_markers: Optional[Dict] = None, show_test_legend: bool = True,
-                         style: str = 'whitegrid', palette: str = 'Set2') -> Tuple[plt.Figure, plt.Axes]:
+                         style: str = 'whitegrid', palette: str = 'Set2',
+                         fast_mode: bool = False, max_samples: int = 1000, 
+                         batch_size: int = 10000) -> Tuple[plt.Figure, plt.Axes]:
     """
     Quick function to plot decision regions with enhanced multiclass support.
     
@@ -561,9 +731,15 @@ def plot_decision_regions(X_train: ArrayLike, y_train: ArrayLike, classifier: An
         Custom markers for classes {class_label: marker}
     show_test_legend : bool, default=True
         Whether to show separate legend entries for test points
+    fast_mode : bool, default=False
+        Enable optimizations for large datasets/slow classifiers like Random Forest
+    max_samples : int, default=1000
+        Maximum training samples to use for determining mesh bounds in fast_mode
+    batch_size : int, default=10000
+        Batch size for mesh predictions to avoid memory issues
     """
     plotter = DecisionRegionPlotter(style=style, palette=palette)
     return plotter.plot_decision_regions(X_train, y_train, classifier, X_test, y_test, 
                                        feature_indices, resolution, figsize, alpha_regions, alpha_points,
                                        title, feature_names, class_names, custom_colors, custom_markers,
-                                       show_test_legend)
+                                       show_test_legend, 'best', fast_mode, max_samples, batch_size)
