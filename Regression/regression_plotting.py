@@ -44,7 +44,8 @@ class RegressionFitPlotter:
                               target_name: Optional[str] = None, figsize: Tuple[int, int] = (10, 6),
                               show_ci: bool = True, scatter_alpha: float = 0.6, line_alpha: float = 0.8,
                               color_by_residuals: bool = False, title: Optional[str] = None,
-                              plot_regression_line: bool = True, n_points: int = 100) -> Tuple[plt.Figure, plt.Axes]:
+                              plot_regression_line: bool = True, n_points: int = 100,
+                              line_color: str = 'red') -> Tuple[plt.Figure, plt.Axes]:
         """
         Plot a single feature against the target variable with optional regression line.
         
@@ -82,6 +83,8 @@ class RegressionFitPlotter:
             Whether to plot regression line
         n_points : int, default=100
             Number of points for smooth regression line
+        line_color : str, default='red'
+            Color for the regression line
             
         Returns:
         --------
@@ -157,7 +160,7 @@ class RegressionFitPlotter:
                         x_range_full = x_range.reshape(-1, 1)
                     
                     y_range_pred = regressor.predict(x_range_full)
-                    ax.plot(x_range, y_range_pred, color='red', alpha=line_alpha, 
+                    ax.plot(x_range, y_range_pred, color=line_color, alpha=line_alpha, 
                            linewidth=2, label='Model Prediction')
                     
                     # Add R² score to plot
@@ -174,12 +177,12 @@ class RegressionFitPlotter:
                 # Use seaborn regplot for simple linear regression
                 if show_ci:
                     sns.regplot(x=x_feature, y=y, ax=ax, scatter=False, 
-                               color='red', line_kws={'alpha': line_alpha})
+                               color=line_color, line_kws={'alpha': line_alpha})
                 else:
                     # Simple linear regression without confidence intervals
                     slope, intercept, r_value, p_value, std_err = stats.linregress(x_feature, y)
                     y_range_pred = slope * x_range + intercept
-                    ax.plot(x_range, y_range_pred, color='red', alpha=line_alpha, 
+                    ax.plot(x_range, y_range_pred, color=line_color, alpha=line_alpha, 
                            linewidth=2, label=f'Linear Fit (R² = {r_value**2:.3f})')
         
         # Customize plot
@@ -517,7 +520,8 @@ class RegressionFitPlotter:
                               feature_indices: Optional[List[int]] = None,
                               X_test: Optional[ArrayLike] = None, y_test: Optional[ArrayLike] = None,
                               feature_names: Optional[List[str]] = None, target_name: Optional[str] = None,
-                              figsize: Tuple[int, int] = (15, 10), max_features: int = 6) -> Tuple[plt.Figure, np.ndarray]:
+                              figsize: Tuple[int, int] = (15, 10), max_features: int = 6,
+                              line_color: str = 'red') -> Tuple[plt.Figure, np.ndarray]:
         """
         Plot multiple features vs target in subplots.
         
@@ -539,6 +543,8 @@ class RegressionFitPlotter:
             Figure size
         max_features : int, default=6
             Maximum number of features to plot
+        line_color : str, default='red'
+            Color for the regression lines
             
         Returns:
         --------
@@ -572,7 +578,7 @@ class RegressionFitPlotter:
             
             # Plot single feature
             self._plot_single_feature(X, y, feat_idx, regressor, X_test, y_test,
-                                    feature_names, target_name, ax)
+                                    feature_names, target_name, ax, line_color)
         
         # Hide unused subplots
         for idx in range(n_features, len(axes_flat)):
@@ -584,7 +590,8 @@ class RegressionFitPlotter:
     def _plot_single_feature(self, X: ArrayLike, y: ArrayLike, feature_index: int,
                            regressor: Optional[Any], X_test: Optional[ArrayLike], 
                            y_test: Optional[ArrayLike], feature_names: Optional[List[str]],
-                           target_name: Optional[str], ax: plt.Axes) -> None:
+                           target_name: Optional[str], ax: plt.Axes, 
+                           line_color: str = 'red') -> None:
         """Helper method for plotting a single feature."""
         
         x_feature = X[:, feature_index]
@@ -616,14 +623,14 @@ class RegressionFitPlotter:
                     x_range_full = x_range.reshape(-1, 1)
                 
                 y_range_pred = regressor.predict(x_range_full)
-                ax.plot(x_range, y_range_pred, color='red', linewidth=2, 
+                ax.plot(x_range, y_range_pred, color=line_color, linewidth=2, 
                        alpha=0.8, label='Model')
                 
             except Exception as e:
                 warnings.warn(f"Could not plot regression line: {e}")
         else:
             # Simple linear regression
-            sns.regplot(x=x_feature, y=y, ax=ax, scatter=False, color='red')
+            sns.regplot(x=x_feature, y=y, ax=ax, scatter=False, color=line_color)
         
         # Customize
         if feature_names and len(feature_names) > feature_index:
@@ -649,14 +656,16 @@ def plot_feature_vs_target(X: ArrayLike, y: ArrayLike, feature_index: int,
                           y_test: Optional[ArrayLike] = None, feature_names: Optional[List[str]] = None,
                           target_name: Optional[str] = None, figsize: Tuple[int, int] = (10, 6),
                           show_ci: bool = True, color_by_residuals: bool = False,
-                          style: str = 'whitegrid', palette: str = 'viridis') -> Tuple[plt.Figure, plt.Axes]:
+                          style: str = 'whitegrid', palette: str = 'viridis',
+                          line_color: str = 'red') -> Tuple[plt.Figure, plt.Axes]:
     """
     Quick function to plot a single feature vs target.
     """
     plotter = RegressionFitPlotter(style=style, palette=palette)
     return plotter.plot_feature_vs_target(X, y, feature_index, regressor, X_test, y_test,
                                         feature_names, target_name, figsize, show_ci,
-                                        color_by_residuals=color_by_residuals)
+                                        color_by_residuals=color_by_residuals,
+                                        line_color=line_color)
 
 
 def plot_regression_surface(X: ArrayLike, y: ArrayLike, regressor: Any,
@@ -691,13 +700,15 @@ def plot_multiple_features(X: ArrayLike, y: ArrayLike, regressor: Optional[Any] 
                           X_test: Optional[ArrayLike] = None, y_test: Optional[ArrayLike] = None,
                           feature_names: Optional[List[str]] = None, target_name: Optional[str] = None,
                           figsize: Tuple[int, int] = (15, 10), max_features: int = 6,
-                          style: str = 'whitegrid', palette: str = 'viridis') -> Tuple[plt.Figure, np.ndarray]:
+                          style: str = 'whitegrid', palette: str = 'viridis',
+                          line_color: str = 'red') -> Tuple[plt.Figure, np.ndarray]:
     """
     Quick function to plot multiple features vs target in subplots.
     """
     plotter = RegressionFitPlotter(style=style, palette=palette)
     return plotter.plot_multiple_features(X, y, regressor, feature_indices, X_test, y_test,
-                                        feature_names, target_name, figsize, max_features)
+                                        feature_names, target_name, figsize, max_features,
+                                        line_color=line_color)
 
 
 def check_regression_data(X: ArrayLike, y: ArrayLike, feature_indices: Optional[List[int]] = None,
@@ -759,7 +770,7 @@ def check_regression_data(X: ArrayLike, y: ArrayLike, feature_indices: Optional[
     
     print(f"\n--- Plotting Recommendations ---")
     print("For individual features:")
-    print("  plot_feature_vs_target(X, y, feature_index=0, regressor=your_model)")
+    print("  plot_feature_vs_target(X, y, feature_index=0, regressor=your_model, line_color='green')")
     
     if X.shape[1] >= 2:
         print("For regression surface:")
@@ -770,7 +781,7 @@ def check_regression_data(X: ArrayLike, y: ArrayLike, feature_indices: Optional[
     
     if X.shape[1] > 1:
         print("For multiple features:")
-        print("  plot_multiple_features(X, y, regressor=your_model)")
+        print("  plot_multiple_features(X, y, regressor=your_model, line_color='darkblue')")
 
 
 # Example usage and demo function
@@ -807,14 +818,14 @@ def demo_regression_plotter():
     print("Generated synthetic data with known relationships")
     print("Fitted Random Forest Regressor")
     print("\nTry these plotting functions:")
-    print("1. plot_feature_vs_target(X_train, y_train, 0, regressor, X_test, y_test, feature_names)")
+    print("1. plot_feature_vs_target(X_train, y_train, 0, regressor, X_test, y_test, feature_names, line_color='green')")
     print("2. plot_regression_surface(X_train, y_train, regressor, (0,1), X_test, y_test, feature_names=feature_names)")
     print("3. plot_residuals(X_train, y_train, regressor, X_test, y_test)")
-    print("4. plot_multiple_features(X_train, y_train, regressor, feature_names=feature_names)")
+    print("4. plot_multiple_features(X_train, y_train, regressor, feature_names=feature_names, line_color='purple')")
     
     return X_train, y_train, X_test, y_test, regressor, feature_names
 
 
 if __name__ == "__main__":
     # Run demo if script is executed directly
-    demo_regression_plotter()
+    demo_regression_plotter() 
