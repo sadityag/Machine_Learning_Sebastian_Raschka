@@ -102,7 +102,7 @@ class NeuralMLP:
         """
         # Convert labels to one-hot if necessary
         if not self.is_onehot:
-            y_onehot = self.int_to_onehot(y, self.num_classes)
+            y_onehot = self.int_to_onehot(y)
         else:
             y_onehot = y
 
@@ -131,9 +131,9 @@ class NeuralMLP:
 
         return (d_loss__dw_out, d_loss__db_out, d_loss__d_w_h, d_loss__d_b_h)
     
-    def mse(self, y_true: np.ndarray, probs: np.ndarray) -> np.float:
+    def mse(self, y_true: np.ndarray, probs: np.ndarray) -> float:
         tgt = y_true if self.is_onehot else self.int_to_onehot(y_true)
         return np.mean((tgt - probs) ** 2)
     
-    def accuracy(self, y_true: np.ndarray, predicted: np.ndarray) -> np.float:
+    def accuracy(self, y_true: np.ndarray, predicted: np.ndarray) -> float:
         return np.mean(predicted == y_true)
