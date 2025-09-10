@@ -1,3 +1,6 @@
 **/aclImdb/
 *.csv
 **/MNIST/
+*.png
+**/celeba/
+*.jpg
