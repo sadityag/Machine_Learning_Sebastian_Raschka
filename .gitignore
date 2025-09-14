@@ -4,3 +4,5 @@
 *.png
 **/celeba/
 *.jpg
+**/imdb/
+*.txt
